@@ -1,3 +1,16 @@
+# macOS specific
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Node modules
+node_modules/
+
+# Electron build output - ignore everything except dmg and zip in dist
+/dist/*
+!/dist/*.dmg
+!/dist/*.zip
+
 # Logs
 logs
 *.log
