@@ -1,9 +1,13 @@
-import { app, BrowserWindow, Menu, Tray, shell, nativeImage } from "electron";
+import { app, BrowserWindow, Tray, shell, ipcMain } from "electron";
+// Vite-Forge injected constants for renderer entries
+declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
+declare const MAIN_WINDOW_VITE_NAME: string;
+declare const TRAY_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
+declare const TRAY_WINDOW_VITE_NAME: string;
 import path from "node:path";
 import started from "electron-squirrel-startup";
 import { exec } from "child_process";
 import os from "os";
-import { menubar } from "menubar";
 import Store from "electron-store";
 
 // Initialize electron-store for persisting settings window bounds
@@ -12,11 +16,16 @@ const store = new Store();
 // Keep reference so the Tray isn't garbage-collected
 let tray: Tray | null = null;
 let settingsWindow: BrowserWindow | null = null;
+let trayWindow: BrowserWindow | null = null;
 
 // When running in development
 let iconPath: string;
 if (app.isPackaged) {
-  iconPath = path.join(process.resourcesPath, "assets", "IconEnergyTemplate.png");
+  iconPath = path.join(
+    process.resourcesPath,
+    "assets",
+    "IconEnergyTemplate.png"
+  );
 } else {
   iconPath = path.join(process.cwd(), "assets", "IconEnergyTemplate.png");
 }
@@ -24,66 +33,61 @@ if (app.isPackaged) {
 function createTray() {
   tray = new Tray(iconPath);
 
-  const contextMenu = Menu.buildFromTemplate([
-    {
-      label: "Open Browser",
-      submenu: [
-        {
-          label: "Firefox",
-          accelerator: "Command+F",
-          click: () => exec('open -n -a "Firefox"'),
-        },
-        {
-          label: "Librewolf",
-          accelerator: "Command+L",
-          click: () => exec('open -n -a "Librewolf"'),
-        },
-        {
-          label: "Brave Browser",
-          accelerator: "Command+B",
-          click: () => exec('open -n -a "Brave Browser"'),
-        },
-        {
-          label: "Google Chrome",
-          accelerator: "Command+G",
-          click: () => exec('open -n -a "Google Chrome"'),
-        },
-        {
-          label: "Microsoft Edge",
-          accelerator: "Command+M",
-          click: () => exec('open -n -a "Microsoft Edge"'),
-        },
-      ],
-    },
-    {
-      label: "Open Visual Studio Code",
-      accelerator: "Command+V",
-      click: openVSCodeNewWindow,
-    },
-    {
-      label: "Open Home Directory",
-      accelerator: "Command+H",
-      click: openFinderAtHome,
-    },
-    { type: "separator" },
-    {
-      label: "GitHub",
-      accelerator: "Command+,?",
-      click: () =>
-        shell.openExternal("https://github.com/sebfried/menubarmaid"),
-    },
-    {
-      label: "Settings...",
-      accelerator: "Command+,",
-      click: openSettingsWindow,
-    },
-    { type: "separator" },
-    { label: "⏻ Quit Menu Barmaid", accelerator: "Command+Q", role: "quit" },
-  ]);
-  tray.setContextMenu(contextMenu);
+  tray.on("click", (_event, bounds) => {
+    const windowWidth = 320;
+    const windowHeight = 420;
 
-  // Optional menubar helper (creates invisible window & keeps tray reliable)
-  menubar({ tray });
+    const x = Math.round(bounds.x - windowWidth / 2);
+    const y = Math.round(bounds.y - windowHeight);
+
+    if (trayWindow && !trayWindow.isDestroyed()) {
+      trayWindow.setBounds({ x, y, width: windowWidth, height: windowHeight });
+      trayWindow.isVisible() ? trayWindow.hide() : trayWindow.show();
+      return;
+    }
+
+    trayWindow = new BrowserWindow({
+      width: windowWidth,
+      height: windowHeight,
+      x,
+      y,
+      frame: false,
+      resizable: false,
+      movable: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      show: false,
+      fullscreenable: false,
+      backgroundColor: "#00000000",
+      webPreferences: {
+        preload: path.join(__dirname, "preload.js"),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+
+    // Load from the Vite dev server in development
+    // In production, load the bundled version
+    if (TRAY_WINDOW_VITE_DEV_SERVER_URL) {
+      // Development: load from Vite dev server
+      const windowurl = `${TRAY_WINDOW_VITE_DEV_SERVER_URL}/src/renderer/tray_window/index.html`;
+      trayWindow.loadURL(windowurl);
+      console.log("Loading tray window from dev server", windowurl);
+    } else {
+      trayWindow.loadFile(
+        path.join(
+          __dirname,
+          `../renderer/${TRAY_WINDOW_VITE_NAME ?? "tray_window"}/index.html`
+        )
+      );
+    }
+
+    trayWindow.once("ready-to-show", () => trayWindow?.show());
+    trayWindow.on("blur", () => trayWindow?.hide());
+    trayWindow.on("closed", () => {
+      trayWindow = null;
+    });
+  });
 }
 
 function openSettingsWindow() {
@@ -164,10 +168,22 @@ const createWindow = () => {
 
   // and load the index.html of the app.
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+    console.log("Loading main window from dev server");
+    // Try the standard forge path first (e.g. http://localhost:5173/renderer/main_window/index.html)
+    const devUrl = `${MAIN_WINDOW_VITE_DEV_SERVER_URL}/src/renderer/main_window/index.html`;
+    mainWindow.loadURL(devUrl).catch(() => {
+      console.log("Failed to load dev URL", devUrl);
+      // Fallback to direct root if the plugin serves at /main_window/index.html
+      mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL!);
+    });
   } else {
+    console.log("Loading main window from production");
+    // Production: use renderer bundle created by Forge Vite plugin
     mainWindow.loadFile(
-      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)
+      path.join(
+        __dirname,
+        `../renderer/${MAIN_WINDOW_VITE_NAME ?? "main_window"}/index.html`
+      )
     );
   }
 
@@ -206,3 +222,17 @@ app.on("activate", () => {
 if (started) {
   app.quit();
 }
+
+// ──────────────────────────────────────────
+// IPC handlers for renderer→main actions
+// ──────────────────────────────────────────
+ipcMain.on("open-browser", (_evt, browser: string) => {
+  exec(`open -n -a "${browser}"`);
+});
+
+ipcMain.on("open-vscode", () => openVSCodeNewWindow());
+ipcMain.on("open-home", () => openFinderAtHome());
+ipcMain.on("open-github", () =>
+  shell.openExternal("https://github.com/sebfried/menubarmaid")
+);
+ipcMain.on("quit-app", () => app.quit());
