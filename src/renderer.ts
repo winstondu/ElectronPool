@@ -26,6 +26,23 @@
  * ```
  */
 
-import './index.css';
+import "./index.css";
 
-console.log('👋 This message is being logged by "renderer.ts", included via Vite');
+console.log(
+  '👋 This message is being logged by "renderer.ts", included via Vite'
+);
+
+declare global {
+  interface Window {
+    electron: {
+      openBrowser: (browser: string) => void;
+      openVSCode: () => void;
+      openHome: () => void;
+      openGitHub: () => void;
+      quitApp: () => void;
+      getScreenshots: () => Promise<string[]>;
+      onScreenshotsUpdated: (cb: (paths: string[]) => void) => void;
+      openFile: (p: string) => Promise<void>;
+    };
+  }
+}

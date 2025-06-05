@@ -9,7 +9,7 @@ import started from "electron-squirrel-startup";
 import { exec } from "child_process";
 import os from "os";
 import Store from "electron-store";
-
+import { readScreenshots, watchScreenshots } from "./screenshots";
 // Initialize electron-store for persisting settings window bounds
 const store = new Store();
 
@@ -189,6 +189,7 @@ const createWindow = () => {
 
   // Open the DevTools.
   mainWindow.webContents.openDevTools();
+  return mainWindow;
 };
 
 // This method will be called when Electron has finished
@@ -196,7 +197,12 @@ const createWindow = () => {
 // Some APIs can only be used after this event occurs.
 app.on("ready", () => {
   createTray();
-  createWindow();
+  const mainWindow = createWindow();
+
+  watchScreenshots(mainWindow);
+
+  ipcMain.handle("get-screenshots", () => readScreenshots());
+  ipcMain.handle("open-file", (_e, p: string) => shell.openPath(p));
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common
