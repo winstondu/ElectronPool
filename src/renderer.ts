@@ -26,6 +26,33 @@
  * ```
  */
 
-import './index.css';
+import "./index.css";
 
-console.log('👋 This message is being logged by "renderer.ts", included via Vite');
+declare global {
+  interface Window {
+    electronAPI: {
+      getScreenshots: () => Promise<string[]>;
+      onScreenshotsUpdated: (cb: (paths: string[]) => void) => void;
+      openFile: (p: string) => Promise<void>;
+    };
+  }
+}
+
+const grid = document.getElementById("grid") as HTMLElement;
+
+function renderGrid(paths: string[]) {
+  grid.innerHTML = "";
+  paths.forEach((p) => {
+    const item = document.createElement("div");
+    item.className = "grid-item";
+    const img = document.createElement("img");
+    img.src = `file://${p}`;
+    item.appendChild(img);
+    item.ondblclick = () => window.electronAPI.openFile(p);
+    grid.appendChild(item);
+  });
+}
+
+window.electronAPI.getScreenshots().then(renderGrid);
+window.electronAPI.onScreenshotsUpdated(renderGrid);
+
