@@ -1,10 +1,19 @@
-import { app, BrowserWindow, Menu, Tray, shell, nativeImage } from "electron";
+import {
+  app,
+  BrowserWindow,
+  Menu,
+  Tray,
+  shell,
+  nativeImage,
+  ipcMain,
+} from "electron";
 import path from "node:path";
 import started from "electron-squirrel-startup";
 import { exec } from "child_process";
 import os from "os";
 import { menubar } from "menubar";
 import Store from "electron-store";
+import fs from "fs";
 
 // Initialize electron-store for persisting settings window bounds
 const store = new Store();
@@ -12,6 +21,7 @@ const store = new Store();
 // Keep reference so the Tray isn't garbage-collected
 let tray: Tray | null = null;
 let settingsWindow: BrowserWindow | null = null;
+let mainWindow: BrowserWindow | null = null;
 
 // When running in development
 let iconPath: string;
@@ -152,9 +162,33 @@ function openFinderAtHome() {
   });
 }
 
+const desktopDir = path.join(os.homedir(), "Desktop");
+
+function readScreenshots(): string[] {
+  try {
+    const files = fs.readdirSync(desktopDir);
+    return files
+      .filter((f) =>
+        /screenshot/i.test(f) && /\.(png|jpe?g|gif|bmp|webp)$/i.test(f)
+      )
+      .map((f) => path.join(desktopDir, f));
+  } catch (e) {
+    console.error("Failed reading Desktop", e);
+    return [];
+  }
+}
+
+function watchScreenshots() {
+  fs.watch(desktopDir, { persistent: false }, () => {
+    if (mainWindow) {
+      mainWindow.webContents.send("screenshots-updated", readScreenshots());
+    }
+  });
+}
+
 const createWindow = () => {
   // Create the browser window.
-  const mainWindow = new BrowserWindow({
+  mainWindow = new BrowserWindow({
     width: 800,
     height: 600,
     webPreferences: {
@@ -173,7 +207,11 @@ const createWindow = () => {
 
   // Open the DevTools.
   mainWindow.webContents.openDevTools();
-};
+
+  mainWindow.webContents.once("did-finish-load", () => {
+    mainWindow?.webContents.send("screenshots-updated", readScreenshots());
+  });
+}; 
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
@@ -181,6 +219,10 @@ const createWindow = () => {
 app.on("ready", () => {
   createTray();
   createWindow();
+  watchScreenshots();
+
+  ipcMain.handle("get-screenshots", () => readScreenshots());
+  ipcMain.handle("open-file", (_e, p: string) => shell.openPath(p));
 });
 
 // Quit when all windows are closed, except on macOS. There, it's common
